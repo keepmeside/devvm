@@ -84,6 +84,9 @@ func (e Launch) open(ctx context.Context, o Options, t *target) error {
 	if err := e.setUpVM(ctx, t, conf); err != nil {
 		return err
 	}
+	if o.NoShell {
+		return nil
+	}
 	cmd, err := t.shell(ctx)
 	if err != nil {
 		return err

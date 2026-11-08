@@ -56,7 +56,7 @@ func TestPersistentFlags(t *testing.T) {
 func TestFlagNames(t *testing.T) {
 	// the only one-letter flags, each for one flag name wherever it
 	// appears: few enough to learn
-	shorthands := map[string]string{"h": "help", "v": "verbose", "f": "force", "g": "global", "n": "lines"}
+	shorthands := map[string]string{"h": "help", "v": "verbose", "f": "force", "g": "global", "n": "lines", "i": "interactive"}
 	// the flag names whose help differs between commands, with why it's
 	// one meaning still
 	manyUses := map[string]string{
@@ -242,7 +242,8 @@ func TestUpFlagsAreUpsAlone(t *testing.T) {
 			if c.Flags().Lookup(name) == nil {
 				continue
 			}
-			ok := c == root || (c.Name() == "size" && slices.Contains(sizeFlags, name)) || (c.Name() == "setup" && (name == "agents" || name == "layers"))
+			// devvm create (the Stella fork) makes a VM as devvm does, without its shell.
+			ok := c == root || (c.Name() == "create" && !slices.Contains([]string{"clone", "unsafe-folder", "no-git-protect", "ssh-agent", "no-devcontainer", "network-policy", "no-network-policy"}, name)) || (c.Name() == "size" && slices.Contains(sizeFlags, name)) || (c.Name() == "setup" && (name == "agents" || name == "layers"))
 			if !ok {
 				t.Errorf("%s takes --%s", c.CommandPath(), name)
 			}
@@ -261,7 +262,7 @@ func folderCommands() []string {
 		"devvm network rm", "devvm network log", "devvm ssh-agent", "devvm git-protect", "devvm clone",
 		"devvm secret use", "devvm secret unuse", "devvm layer add", "devvm layer rm", "devvm group", "devvm group join",
 		"devvm group leave", "devvm link", "devvm link add", "devvm link rm", "devvm link publish", "devvm link unpublish",
-		"devvm agent save", "devvm agent login",
+		"devvm agent save", "devvm agent login", "devvm create",
 	}
 }
 

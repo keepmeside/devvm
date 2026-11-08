@@ -402,8 +402,13 @@ func (l *machines) CreateVM(ctx context.Context, image string, spec backend.VMSp
 		return msg.LimaHomeTooLong(l.Dirs.Lima, vm)
 	}
 	src := ImagePrefix + image
+	if spec.Snapshot != "" {
+		src = SnapshotPrefix + spec.Snapshot
+	}
 	img, err := l.inspect(ctx, src)
-	if errors.Is(err, backend.ErrNotFound) {
+	if errors.Is(err, backend.ErrNotFound) && spec.Snapshot != "" {
+		return fmt.Errorf("no snapshot %s", spec.Snapshot)
+	} else if errors.Is(err, backend.ErrNotFound) {
 		return msg.ImageMissing(image)
 	} else if err != nil {
 		return err

@@ -42,6 +42,8 @@ type Options struct {
 	From                       string         // --from, or its default: the container image a new VM's base starts from
 	FromSet                    bool           // --from was given, not its default
 	NoDevcontainer             bool           // --no-devcontainer: a new VM ignores the folder's devcontainer.json
+	NoShell                    bool           // devvm create: make or start the VM, then return instead of opening a shell
+	Snapshot                   string         // devvm create --from-snapshot: a new VM is a clone of this snapshot instead of its image
 }
 
 // Launch opens a shell, ssh or an editor in the folder's VM: a new VM
@@ -304,6 +306,11 @@ func (e creation) create(ctx context.Context, o Options, f project.Folder, b bac
 	if err := e.setUpVM(ctx, t, started); err != nil {
 		return err
 	}
+	if o.NoShell {
+		done()
+		unmaking()
+		return nil
+	}
 	cmd, err := t.shell(ctx)
 	if err != nil {
 		return err
@@ -454,6 +461,7 @@ func (e creation) plan(ctx context.Context, o Options, f project.Folder, b backe
 	n.img, n.tools = parts.image(), parts.tools()
 	n.dcGave = fileParts(o, f.Dir, n.dc, def, parts)
 	n.spec = e.machineSpec(b, f, n.tools, o.SSHAgent, n.size, o.Clone)
+	n.spec.Snapshot = o.Snapshot
 	if o.SSHAgent {
 		n.agent = sshagent.On
 	}

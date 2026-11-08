@@ -9,6 +9,7 @@ import (
 
 // newStopCmd is devvm stop.
 func newStopCmd(a *app) *cobra.Command {
+	var name string
 	cmd := &cobra.Command{
 		Use:   "stop",
 		Short: "Stop this folder's VM",
@@ -19,9 +20,13 @@ func newStopCmd(a *app) *cobra.Command {
 		),
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := toVM(a, name); err != nil {
+				return err
+			}
 			return a.env(func(env *vm.Env) error { return vm.Lifecycle{Env: env}.Stop(cmd.Context()) }, msg.StopVMFailed)
 		},
 	}
 	addFolderFlags(cmd, a)
+	vmFlag(cmd, &name)
 	return cmd
 }

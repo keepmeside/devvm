@@ -22,9 +22,10 @@ devvm stop [flags]
 ## Options
 
 ```text
-  -h, --help     help for stop
-      --here     use this folder's own VM, never that of a folder it's inside
-      --parent   use the VM of the nearest folder this one is inside, even across a git repo of its own
+  -h, --help      help for stop
+      --here      use this folder's own VM, never that of a folder it's inside
+      --parent    use the VM of the nearest folder this one is inside, even across a git repo of its own
+      --vm NAME   the NAME of the VM to act on, as devvm ls lists it, instead of this folder's
 ```
 
 ## Options inherited from parent commands

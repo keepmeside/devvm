@@ -32,6 +32,7 @@ devvm rm [VM] [flags]
       --no-clone-check   don't check a --clone VM's clone for unfetched commits and uncommitted changes first, which are lost
       --no-export        don't export the agents' history first
       --parent           use the VM of the nearest folder this one is inside, even across a git repo of its own
+      --vm NAME          the NAME of the VM to act on, as devvm ls lists it, instead of this folder's
 ```
 
 ## Options inherited from parent commands

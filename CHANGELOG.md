@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.1-stella.1
+
+The Stella fork (keepmeside/devvm, branch `stella/headless`), on 0.1.0. Hidden verbs for driving devvm from a program, without a terminal and without editing `~/.ssh/config`:
+
+- `devvm create [--json] [--from-snapshot ID]`: makes the folder's VM like `devvm` does, or starts it, and returns instead of opening a shell.
+- `devvm start [--vm NAME]`: starts a VM and sets it up as before its shell.
+- `devvm exec [--vm NAME] [-i] [--root] -- ARGV...`: runs a command over devvm's own ssh config, with its exit code; `-i` passes input, `--root` runs it with `sudo -n -H`.
+- `devvm forward [--vm NAME] [--json] [--close] PORT`: forwards a guest loopback port to a free loopback port the computer chooses, so two VMs can forward the same guest port.
+- `devvm snapshot save [--vm NAME] ID`, `devvm snapshot rm ID`, `devvm snapshot [--json]`: a VM saved as a Lima clone (stopped first, started again after), deleted, listed.
+- `--vm NAME` on `stop`, `rm`, `start`, `exec`, `forward` and `snapshot save`: acts on the VM named, from its folder; `rm --vm` deletes the VM while its folder is still there, never the folder.
+
 ## 0.1.0
 
 Released 2026-11-06.

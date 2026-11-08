@@ -10,6 +10,7 @@ import (
 // newRmCmd is devvm rm [VM] [--force] [--no-export] [--no-clone-check].
 func newRmCmd(a *app) *cobra.Command {
 	var o vm.RmOptions
+	var name string
 	cmd := &cobra.Command{
 		Use:   "rm [VM]",
 		Short: "Delete this folder's VM, or a VM whose folder is gone",
@@ -25,6 +26,11 @@ func newRmCmd(a *app) *cobra.Command {
 		),
 		Args: cobra.MatchAll(maxArgs(1), noFolderFlagsWithVM),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// --vm deletes the VM named from its folder, which may still be
+			// there: the VM alone, never the folder.
+			if err := toVM(a, name); err != nil {
+				return err
+			}
 			if len(args) == 1 {
 				name := args[0]
 				return a.env(func(env *vm.Env) error { return vm.Lifecycle{Env: env}.RmVM(cmd.Context(), name, o) },
@@ -37,6 +43,7 @@ func newRmCmd(a *app) *cobra.Command {
 	addNoExportFlag(cmd.Flags(), &o.NoExport)
 	addNoCloneCheckFlag(cmd.Flags(), &o.NoCloneCheck)
 	addFolderFlags(cmd, a)
+	vmFlag(cmd, &name)
 	return cmd
 }
 

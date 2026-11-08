@@ -315,3 +315,7 @@ func (d Dirs) Secrets() string { return filepath.Join(d.Data, "secrets") }
 
 // SSHConfig is the SSH config devvm writes for its VMs.
 func (d Dirs) SSHConfig() string { return filepath.Join(d.Data, "ssh_config") }
+
+// StellaForwards is where devvm forward (the Stella fork) keeps its
+// forwards' records, one file per VM and guest port.
+func StellaForwards(d Dirs) string { return filepath.Join(d.Data, "stella-forwards") }

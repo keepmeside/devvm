@@ -422,6 +422,9 @@ type VMSpec struct {
 	// proxy's (Confinement.Env): a backend that keeps it in the VM's
 	// config sets it at create.
 	Env map[string]string
+	// Snapshot is the ID of a saved snapshot (devvm snapshot save) the VM
+	// is cloned from instead of its image's instance; "" for the image.
+	Snapshot string
 }
 
 // Size is a VM's CPUs, memory and disk. Zero is unset.

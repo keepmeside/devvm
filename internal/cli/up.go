@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/devvmhq/devvm/internal/build"
 	"github.com/devvmhq/devvm/internal/image"
@@ -37,6 +38,19 @@ type upFlags struct {
 // --parent too (a's).
 func addUpFlags(root *cobra.Command, a *app, uf *upFlags) {
 	f := root.Flags()
+	addNewVMFlags(f, uf)
+	f.BoolVar(&uf.clone, "clone", false, "create the VM with its own clone of this repo instead of mounting the folder")
+	f.BoolVar(&uf.unsafeFolder, "unsafe-folder", false, "mount a folder devvm refuses, such as your home folder")
+	f.BoolVar(&uf.noGitProtect, "no-git-protect", false, "create the VM without .git protection")
+	f.BoolVar(&uf.sshAgent, "ssh-agent", false, "create the VM with your SSH agent forwarded, so anything in it can use your keys while you're connected")
+	f.BoolVar(&uf.noDevcontainer, "no-devcontainer", false, "create the VM without reading the folder's devcontainer.json")
+	addFolderFlags(root, a)
+	exclusive(root, "clone", "parent")
+	addSSHConfigFlag(f, &uf.sshConfig)
+}
+
+// addNewVMFlags adds what a new VM gets, devvm's and devvm create's.
+func addNewVMFlags(f *pflag.FlagSet, uf *upFlags) {
 	f.StringVar(&uf.tools, "tools", "", "the `LIST` of toolchains a new VM gets, such as node,python, or none (default: those the folder's files call for)")
 	addAgentsFlag(f, &uf.agents, "the `LIST` of coding agents a new VM gets, such as claude,codex, or none (default: devvm setup's)")
 	addLayersFlag(f, &uf.layers, "the `LIST` of layers a new VM's image gets, bottom first, such as docker,mine, or none (default: devvm setup's)")
@@ -46,14 +60,6 @@ func addUpFlags(root *cobra.Command, a *app, uf *upFlags) {
 	f.StringVar(&uf.size.Memory, "memory", "", "the VM's memory in `GiB`, such as 16 or 16G (default: devvm size -g, else the image's)")
 	f.StringVar(&uf.size.Disk, "disk", "", "the VM's disk in `GiB`, at least the image's (default: devvm size -g, else the image's)")
 	f.StringVar(&uf.ports, "ports", "", "the `PORTS` the VM forwards: all, none or a list like 5173,8000-8010 (default: devvm ports -g, else all)")
-	f.BoolVar(&uf.clone, "clone", false, "create the VM with its own clone of this repo instead of mounting the folder")
-	f.BoolVar(&uf.unsafeFolder, "unsafe-folder", false, "mount a folder devvm refuses, such as your home folder")
-	f.BoolVar(&uf.noGitProtect, "no-git-protect", false, "create the VM without .git protection")
-	f.BoolVar(&uf.sshAgent, "ssh-agent", false, "create the VM with your SSH agent forwarded, so anything in it can use your keys while you're connected")
-	f.BoolVar(&uf.noDevcontainer, "no-devcontainer", false, "create the VM without reading the folder's devcontainer.json")
-	addFolderFlags(root, a)
-	exclusive(root, "clone", "parent")
-	addSSHConfigFlag(f, &uf.sshConfig)
 }
 
 // options are what the flags ask of up.
