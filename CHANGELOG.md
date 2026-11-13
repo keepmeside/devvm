@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1-stella.2
+
+- `devvm forward`: two calls at once start one forward; a forward is found by its pid file and its arguments, so `--close` never signals another process; `stop` and `rm` close a VM's forwards; changing a running VM's ports keeps them.
+- `devvm create` forwards no ports unless `--ports` is given.
+- Snapshots never show as VMs in `devvm ls` or `devvm space`; a snapshot ID that would name a project VM is refused.
+- `--vm NAME` resolves the same way for every verb; `rm --vm` deletes a VM whose folder is gone.
+
 ## 0.1.1-stella.1
 
 The Stella fork (keepmeside/devvm, branch `stella/headless`), on 0.1.0. Hidden verbs for driving devvm from a program, without a terminal and without editing `~/.ssh/config`:
