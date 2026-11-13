@@ -123,7 +123,9 @@ func (f Forwards) start(ctx context.Context, b backend.Backend, st *state.VM) er
 		return err
 	}
 	defer unlock()
-	f.Stop(vm)
+	// Only the forwarder itself restarts: the VM keeps running, so its
+	// devvm forward forwards (PortForwards) stay.
+	f.proc(vm).Stop(2 * time.Second)
 	var only []backend.PortRange
 	if !want.All {
 		// Asked once its old forwarder has stopped: its own ports would

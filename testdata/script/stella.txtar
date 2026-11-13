@@ -80,6 +80,18 @@ stderr '^devvm: forward_failed log=/\S*/run/ports-58790\.log port=58790 vm=devvm
 rm $STUB_DIR/forward-fails
 ! exists $WEB_dir/run/ports-58790.json
 
+# Changing a running VM's same-number ports restarts its forwarder only:
+# its devvm forward forwards keep running.
+exec devvm forward --vm $WEB 58790
+exec sh -c 'cat "$WEB_dir/run/ports-58790.pid" > "$WORK/fpid"'
+cd web
+exec devvm ports 3000
+stdout '^==> ports_forwarding ports=3000 vm=devvm-web-[0-9a-f]{14}$'
+exec sh -c 'kill -0 "$(cat "$WORK/fpid")"'
+exists $WEB_dir/run/ports-58790.json
+exec devvm ports none
+cd $WORK
+
 # stop --vm from another folder stops it, and its forwards with it; start
 # --vm starts it again, from its folder.
 exec devvm forward --vm $WEB 58790
