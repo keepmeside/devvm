@@ -32,6 +32,7 @@ func TestVMFiles(t *testing.T) {
 		v.ForwarderLog():              "logs/ports.log",
 		v.KnownHosts():                "run/known_hosts",
 		v.Forwarder(".lock"):          "run/ports.lock",
+		v.Forwarder("-80.pid"):        "run/ports-80.pid",
 		v.CA().Dir:                    "run/ca",
 		v.CA().Cert():                 "run/ca/ca.pem",
 		v.CA().Key():                  "run/ca/ca.key",
@@ -39,8 +40,8 @@ func TestVMFiles(t *testing.T) {
 		v.CA().NextKey():              "run/ca/next.key",
 		filepath.Join(v.Dir, "other"): "other",
 	}
-	if len(want) != 27 {
-		t.Fatalf("%d paths, want 27: two are the same", len(want))
+	if len(want) != 28 {
+		t.Fatalf("%d paths, want 28: two are the same", len(want))
 	}
 	for got, rel := range want {
 		if got != filepath.Join("/d/vms/0123456789abcd", rel) {

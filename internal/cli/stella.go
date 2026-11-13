@@ -8,68 +8,66 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
+	"slices"
 	"strconv"
-	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/devvmhq/devvm/internal/backend"
 	"github.com/devvmhq/devvm/internal/backend/lima"
 	"github.com/devvmhq/devvm/internal/daemon"
 	"github.com/devvmhq/devvm/internal/msg"
-	"github.com/devvmhq/devvm/internal/paths"
 	"github.com/devvmhq/devvm/internal/platform"
 	"github.com/devvmhq/devvm/internal/shell"
 	"github.com/devvmhq/devvm/internal/sshconfig"
 	"github.com/devvmhq/devvm/internal/state"
 	"github.com/devvmhq/devvm/internal/vm"
+	"github.com/devvmhq/devvm/internal/vmssh"
 )
 
-// vmFlag adds --vm NAME to cmd.
+// vmFlag adds --vm NAME to cmd, which can't go with --here or --parent.
 func vmFlag(cmd *cobra.Command, name *string) {
 	cmd.Flags().StringVar(name, "vm", "", "the `NAME` of the VM to act on, as devvm ls lists it, instead of this folder's")
+	if cmd.Flags().Lookup("here") != nil {
+		exclusive(cmd, "vm", "here", "parent")
+	}
 }
 
-// toVM makes the command act on the VM named name: it runs in that VM's
-// folder, on the folder's own VM (--here). An empty name leaves the folder
-// as it is.
-func toVM(a *app, name string) error {
-	if name == "" {
-		return nil
-	}
-	dir, err := vmDir(a, name)
+// namedState is the state of the VM --vm names (vm.NamedVM), else of the
+// folder's VM (vm.Env.FolderVM).
+func namedState(ctx context.Context, a *app, name string) (*state.VM, error) {
+	d, err := a.dirs()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if err := os.Chdir(dir); err != nil {
-		return fmt.Errorf("the folder of %s, %s: %w", name, dir, err)
+	if name == "" {
+		env, err := a.vmEnv()
+		if err != nil {
+			return nil, err
+		}
+		if name, err = env.FolderVM(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return vm.NamedVM(d, name)
+}
+
+// toFolder makes the command act on st's VM from its folder, as its own
+// (--here), for what starts it: one whose folder is gone is refused, as
+// starting it would make the folder again. It runs before the run's VM
+// environment is made, which reads the folder rule once.
+func toFolder(a *app, st *state.VM) error {
+	if vm.FolderOf(st) != vm.FolderThere {
+		return msg.VMFolderGoneStart(st.Dir, st.Name())
+	}
+	if err := os.Chdir(st.Dir); err != nil {
+		return err
 	}
 	a.folder.here = true
 	return nil
-}
-
-// vmDir is the folder of the VM named name.
-func vmDir(a *app, name string) (string, error) {
-	d, err := a.dirs()
-	if err != nil {
-		return "", err
-	}
-	inv, err := vm.ReadStates(d)
-	if err != nil {
-		return "", err
-	}
-	for _, st := range inv.States() {
-		if st.Name() == name {
-			return st.Dir, nil
-		}
-	}
-	return "", fmt.Errorf("no VM %s", name)
 }
 
 // createOutput is devvm create --json.
@@ -100,6 +98,7 @@ func newCreateCmd(a *app) *cobra.Command {
 		Hidden: true,
 		Short:  "Create this folder's VM, or start it, without opening a shell",
 		Long: "Create this folder's VM as devvm does, or start it when it exists, then return instead of opening a shell, for scripts. " +
+			"A new VM forwards no ports unless you give --ports: devvm forward forwards one. " +
 			"--from-snapshot makes a new VM from a snapshot that devvm snapshot save made.",
 		Example: examples(
 			"devvm create --no-input --tools none --agents none --layers none --network internet --json", "create the VM headless and print it",
@@ -107,42 +106,35 @@ func newCreateCmd(a *app) *cobra.Command {
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			o := uf.options()
-			o.NoShell = true
-			if snapshot != "" {
-				if err := lima.CheckSnapshotID(snapshot); err != nil {
+			o.NoShell, o.NewPorts, o.Snapshot = true, "none", snapshot
+			var made string
+			err := a.env(func(env *vm.Env) error {
+				if err := (vm.Launch{Env: env}).Up(cmd.Context(), o); err != nil || !asJSON {
 					return err
 				}
-				o.Snapshot = snapshot
-			}
-			err := a.env(func(env *vm.Env) error {
-				return vm.Launch{Env: env}.Up(cmd.Context(), o)
+				var err error
+				made, err = env.FolderVM(cmd.Context())
+				return err
 			}, msg.UpFailed)
-			if err != nil {
+			if err != nil || !asJSON {
 				return err
 			}
-			if !asJSON {
-				return nil
-			}
-			out, err := createdHere(cmd, a)
+			out, err := createdOf(cmd, a, made)
 			if err != nil {
 				return err
 			}
 			return printJSON(a.u, createOutput{VM: out})
 		},
 	}
-	addNewVMFlags(cmd.Flags(), uf)
+	addNewVMFlags(cmd.Flags(), uf, "the `PORTS` a new VM forwards: all, none or a list like 5173,8000-8010 (default: none)")
 	cmd.Flags().StringVar(&snapshot, "from-snapshot", "", "make a new VM from the snapshot `ID` instead of its image")
 	jsonFlag(cmd, &asJSON)
 	addFolderFlags(cmd, a)
 	return cmd
 }
 
-// createdHere is the VM of the current folder, as devvm ls sees it.
-func createdHere(cmd *cobra.Command, a *app) (createdVM, error) {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return createdVM{}, err
-	}
+// createdOf is the VM name, as devvm ls lists it, for devvm create --json.
+func createdOf(cmd *cobra.Command, a *app, name string) (createdVM, error) {
 	ls, err := listVMs(cmd, a)
 	if err != nil {
 		return createdVM{}, err
@@ -155,24 +147,15 @@ func createdHere(cmd *cobra.Command, a *app) (createdVM, error) {
 	if err != nil {
 		return createdVM{}, err
 	}
-	for _, l := range ls {
-		if samePath(l.Folder, cwd) {
-			return createdVM{
-				Name: l.Name, Folder: l.Folder, Status: l.Status,
-				SSH: createdSSH{Config: d.SSHConfig(), Host: sshconfig.New(d, reg).Host(l.Name)},
-			}, nil
-		}
+	i := slices.IndexFunc(ls, func(l vm.Listed) bool { return l.Name == name })
+	if i < 0 {
+		return createdVM{}, msg.RmUnknownVM(name)
 	}
-	return createdVM{}, fmt.Errorf("no VM for %s", cwd)
-}
-
-func samePath(a, b string) bool {
-	if a == b {
-		return true
-	}
-	ra, errA := filepath.EvalSymlinks(a)
-	rb, errB := filepath.EvalSymlinks(b)
-	return errA == nil && errB == nil && ra == rb
+	l := ls[i]
+	return createdVM{
+		Name: l.Name, Folder: l.Folder, Status: l.Status,
+		SSH: createdSSH{Config: d.SSHConfig(), Host: sshconfig.New(d, reg).Host(l.Name)},
+	}, nil
 }
 
 // newStartCmd is devvm start: the VM started and set up as before its
@@ -184,14 +167,25 @@ func newStartCmd(a *app) *cobra.Command {
 		// For Stella (README.md, "Stella fork"), not in devvm's help.
 		Hidden: true,
 		Short:  "Start this folder's VM, or the one --vm names, without opening a shell",
-		Long:   "Start the VM and set it up as devvm does before it opens a shell, then return. It never asks to edit ~/.ssh/config.",
+		Long: "Start the VM and set it up as devvm does before it opens a shell, then return. It never asks to edit ~/.ssh/config. " +
+			"A VM whose folder is gone isn't started, as starting it would make the folder again.",
 		Example: examples(
 			"devvm start --vm devvm-app-0123456789abcd", "start the VM named",
 		),
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := toVM(a, name); err != nil {
-				return err
+			if name != "" {
+				d, err := a.dirs()
+				if err != nil {
+					return err
+				}
+				st, err := vm.NamedVM(d, name)
+				if err != nil {
+					return err
+				}
+				if err := toFolder(a, st); err != nil {
+					return err
+				}
 			}
 			return a.env(func(env *vm.Env) error {
 				return vm.Launch{Env: env}.Up(cmd.Context(), vm.Options{NoShell: true})
@@ -202,8 +196,8 @@ func newStartCmd(a *app) *cobra.Command {
 	return cmd
 }
 
-// sshTo is ssh to the running VM name over devvm's own ssh config, never
-// asking: argv without the program.
+// sshTo is ssh to the VM name over devvm's own ssh config, never asking:
+// the program, and its arguments without it, extra before the host.
 func sshTo(a *app, name string, extra ...string) (string, []string, error) {
 	d, err := a.dirs()
 	if err != nil {
@@ -217,18 +211,8 @@ func sshTo(a *app, name string, extra ...string) (string, []string, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	args := []string{"-F", d.SSHConfig(), "-o", "BatchMode=yes"}
-	args = append(args, extra...)
+	args := append([]string{"-F", d.SSHConfig(), "-o", "BatchMode=yes"}, extra...)
 	return path, append(args, sshconfig.New(d, reg).Host(name)), nil
-}
-
-// namedVM is the VM --vm names, else the current folder's.
-func namedVM(cmd *cobra.Command, a *app, name string) (string, error) {
-	if name != "" {
-		return name, nil
-	}
-	here, err := createdHere(cmd, a)
-	return here.Name, err
 }
 
 // newExecCmd is devvm exec [--vm NAME] [-i] [--root] -- ARGV...
@@ -246,7 +230,7 @@ func newExecCmd(a *app) *cobra.Command {
 		),
 		Args: minArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			n, err := namedVM(cmd, a, name)
+			st, err := namedState(cmd.Context(), a, name)
 			if err != nil {
 				return err
 			}
@@ -254,15 +238,14 @@ func newExecCmd(a *app) *cobra.Command {
 			if !stdin {
 				extra = append(extra, "-n") // its input is the null device
 			}
-			path, sshArgs, err := sshTo(a, n, extra...)
+			path, sshArgs, err := sshTo(a, st.Name(), extra...)
 			if err != nil {
-				return err
+				return failed(err, msg.ExecFailed)
 			}
-			argv := append([]string{"ssh"}, sshArgs...)
-			argv = append(argv, "--", execLine(args, root))
+			argv := slices.Concat([]string{"ssh"}, sshArgs, []string{"--", execLine(args, root)})
 			// In devvm's place: the command's input, output and exit code are
 			// this one's.
-			return platform.Exec(path, argv, os.Environ())
+			return failed(platform.Exec(path, argv, os.Environ()), msg.ExecFailed)
 		},
 	}
 	vmFlag(cmd, &name)
@@ -278,98 +261,6 @@ func execLine(argv []string, root bool) string {
 		argv = append([]string{"sudo", "-n", "-H", "--"}, argv...)
 	}
 	return shell.QuoteJoin(argv)
-}
-
-// forwardRecord is what devvm forward keeps for one VM's guest port.
-type forwardRecord struct {
-	Port int `json:"port"`
-	PID  int `json:"pid"`
-}
-
-// forwards keeps the records of devvm forward, one file each.
-type forwards struct {
-	dir string
-	// alive and listening tell a record that still works; start opens a
-	// forward of guest on port and returns its pid.
-	alive     func(pid int) bool
-	listening func(port int) bool
-	start     func(port int) (int, error)
-	free      func() (int, error)
-}
-
-func (f forwards) path(vmName string, guest int) string {
-	return filepath.Join(f.dir, vmName+"-"+strconv.Itoa(guest)+".json")
-}
-
-// open returns the host port of the VM's forward of guest, opening one on
-// a port the OS chooses when there's none that works.
-func (f forwards) open(vmName string, guest int) (int, error) {
-	if rec, ok := f.read(vmName, guest); ok && f.alive(rec.PID) && f.listening(rec.Port) {
-		return rec.Port, nil
-	}
-	port, err := f.free()
-	if err != nil {
-		return 0, err
-	}
-	pid, err := f.start(port)
-	if err != nil {
-		return 0, err
-	}
-	if err := os.MkdirAll(f.dir, 0o700); err != nil {
-		return 0, err
-	}
-	body, err := json.Marshal(forwardRecord{Port: port, PID: pid})
-	if err != nil {
-		return 0, err
-	}
-	return port, state.WriteFile(f.path(vmName, guest), body)
-}
-
-// close stops the VM's forward of guest; none is nothing to do.
-func (f forwards) close(vmName string, guest int) error {
-	rec, ok := f.read(vmName, guest)
-	if !ok {
-		return nil
-	}
-	if f.alive(rec.PID) {
-		_ = daemon.Signal(rec.PID, 15)
-	}
-	err := os.Remove(f.path(vmName, guest))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	return err
-}
-
-func (f forwards) read(vmName string, guest int) (forwardRecord, bool) {
-	body, err := os.ReadFile(f.path(vmName, guest))
-	if err != nil {
-		return forwardRecord{}, false
-	}
-	var rec forwardRecord
-	if json.Unmarshal(body, &rec) != nil || rec.Port <= 0 {
-		return forwardRecord{}, false
-	}
-	return rec, true
-}
-
-// freeLoopbackPort is a loopback port the OS chooses.
-func freeLoopbackPort() (int, error) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port, nil
-}
-
-func listening(port int) bool {
-	c, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(port), 500*time.Millisecond)
-	if err != nil {
-		return false
-	}
-	_ = c.Close()
-	return true
 }
 
 // forwardOutput is devvm forward --json.
@@ -388,17 +279,17 @@ func newForwardCmd(a *app) *cobra.Command {
 		Hidden: true,
 		Short:  "Forward a guest port of a running VM to a loopback port the computer chooses",
 		Long: "Forward the VM's guest loopback PORT to 127.0.0.1 on a free port the computer chooses, so two VMs can forward the same guest port. " +
-			"The forward runs in the background and ends with the VM; running it again returns the same port while it works. --close stops it.",
+			"The forward runs in the background until the VM stops or is deleted; running it again returns the same port while it works. --close stops it.",
 		Example: examples(
 			"devvm forward --vm devvm-app-0123456789abcd 58790 --json", "forward the VM's port 58790 and print the host port",
 		),
-		Args: exactArgs(1),
+		Args: cobra.MatchAll(exactArgs(1), func(_ *cobra.Command, args []string) error {
+			_, err := vm.ParseLinkPort(args[0])
+			return err
+		}),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			guest, err := strconv.Atoi(args[0])
-			if err != nil || guest < 1 || guest > 65535 {
-				return fmt.Errorf("%q isn't a port from 1 to 65535", args[0])
-			}
-			n, err := namedVM(cmd, a, name)
+			guest, _ := strconv.Atoi(args[0]) // checked in Args
+			st, err := namedState(cmd.Context(), a, name)
 			if err != nil {
 				return err
 			}
@@ -406,20 +297,28 @@ func newForwardCmd(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			f := forwards{dir: forwardsDir(d), alive: daemon.Alive, listening: listening, free: freeLoopbackPort}
+			pf := vmssh.NewPortForwards(d)
 			if closeIt {
-				return f.close(n, guest)
+				return pf.Close(cmd.Context(), st.Name(), guest)
 			}
-			f.start = func(port int) (int, error) { return startForward(a, n, port, guest) }
-			port, err := f.open(n, guest)
+			path, sshArgs, err := sshTo(a, st.Name(), "-N", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3", "-L", "")
 			if err != nil {
-				return fmt.Errorf("%s isn't running, or its port %d can't be forwarded: %w", n, guest, err)
+				return failed(err, msg.ExecFailed)
+			}
+			host := sshArgs[len(sshArgs)-1]
+			port, err := pf.Open(cmd.Context(), st.Name(), host, guest, func(local string) daemon.Cmd {
+				args := slices.Clone(sshArgs)
+				args[len(args)-2] = local // -L's value
+				return daemon.Cmd{Path: path, Args: args}
+			})
+			if err != nil {
+				return err
 			}
 			if asJSON {
-				return printJSON(a.u, forwardOutput{Host: "127.0.0.1", Port: port})
+				return printJSON(a.u, forwardOutput{Host: vmssh.Loopback, Port: port})
 			}
-			fmt.Fprintf(a.u.Stdout(), "127.0.0.1:%d\n", port)
-			return nil
+			_, err = fmt.Fprintf(a.u.Stdout(), "%s:%d\n", vmssh.Loopback, port)
+			return err
 		},
 	}
 	vmFlag(cmd, &name)
@@ -428,37 +327,34 @@ func newForwardCmd(a *app) *cobra.Command {
 	return cmd
 }
 
-func forwardsDir(d paths.Dirs) string { return paths.StellaForwards(d) }
-
-// startForward starts ssh -N -L in the background and waits until port
-// answers.
-func startForward(a *app, vmName string, port, guest int) (int, error) {
-	path, args, err := sshTo(a, vmName,
-		"-N", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=3",
-		"-L", fmt.Sprintf("127.0.0.1:%d:127.0.0.1:%d", port, guest))
-	if err != nil {
-		return 0, err
-	}
-	pid, err := daemon.Detach(daemon.Cmd{Path: path, Args: args})
-	if err != nil {
-		return 0, err
-	}
-	for range 100 {
-		if listening(port) {
-			return pid, nil
-		}
-		if !daemon.Alive(pid) {
-			return 0, errors.New("ssh ended before the forward was up")
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	_ = daemon.Signal(pid, 15)
-	return 0, errors.New("the forward didn't come up within 10 seconds")
-}
-
 // snapshotOutput is devvm snapshot --json.
 type snapshotOutput struct {
-	Snapshots []lima.Snapshot `json:"snapshots"`
+	Snapshots []snapshotEntry `json:"snapshots"`
+}
+
+type snapshotEntry struct {
+	ID string `json:"id"`
+}
+
+// snapshotIDArg checks a snapshot's ID, the command's one argument.
+func snapshotIDArg(_ *cobra.Command, args []string) error { return lima.CheckSnapshotID(args[0]) }
+
+// snapshotter is the backend of st's VM as a backend.Snapshotter (a new
+// VM's for none), refused when it can't save snapshots.
+func snapshotter(a *app, st *state.VM) (backend.Backend, backend.Snapshotter, error) {
+	reg, err := a.registry()
+	if err != nil {
+		return nil, nil, err
+	}
+	c, err := reg.For(st)
+	if err != nil {
+		return nil, nil, err
+	}
+	s, ok := backend.As[backend.Snapshotter](c.Backend)
+	if !ok {
+		return nil, nil, msg.SnapshotsUnsupported(c.Backend.Name())
+	}
+	return c.Backend, s, nil
 }
 
 // newSnapshotCmd is devvm snapshot: the snapshots, bare; save and rm.
@@ -475,26 +371,37 @@ func newSnapshotCmd(a *app) *cobra.Command {
 		),
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			d, err := a.dirs()
+			_, s, err := snapshotter(a, new(state.VM))
 			if err != nil {
 				return err
 			}
-			all, err := lima.Snapshots(cmd.Context(), d)
+			ids, err := s.Snapshots(cmd.Context())
 			if err != nil {
 				return err
 			}
 			if asJSON {
-				return printJSON(a.u, snapshotOutput{Snapshots: all})
+				out := snapshotOutput{Snapshots: []snapshotEntry{}}
+				for _, id := range ids {
+					out.Snapshots = append(out.Snapshots, snapshotEntry{ID: id})
+				}
+				return printJSON(a.u, out)
 			}
-			for _, s := range all {
-				fmt.Fprintln(a.u.Stdout(), s.ID)
+			for _, id := range ids {
+				if _, err := fmt.Fprintln(a.u.Stdout(), id); err != nil {
+					return err
+				}
 			}
 			return nil
 		},
 	}
 	jsonFlag(cmd, &asJSON)
+	cmd.AddCommand(newSnapshotSaveCmd(a), newSnapshotRmCmd(a))
+	return cmd
+}
+
+func newSnapshotSaveCmd(a *app) *cobra.Command {
 	var name string
-	save := &cobra.Command{
+	cmd := &cobra.Command{
 		Use: "save ID",
 		// For Stella (README.md, "Stella fork"), not in devvm's help.
 		Hidden: true,
@@ -503,24 +410,17 @@ func newSnapshotCmd(a *app) *cobra.Command {
 		Example: examples(
 			"devvm snapshot save --vm devvm-app-0123456789abcd s1", "save the VM named as the snapshot s1",
 		),
-		Args: exactArgs(1),
+		Args: cobra.MatchAll(exactArgs(1), snapshotIDArg),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			id := args[0]
-			if err := lima.CheckSnapshotID(id); err != nil {
-				return err
-			}
-			if err := toVM(a, name); err != nil {
-				return err
-			}
-			n, err := namedVM(cmd, a, name)
-			if err != nil {
-				return err
-			}
-			return saveSnapshot(cmd.Context(), a, n, id)
+			return saveSnapshot(cmd.Context(), a, name, args[0])
 		},
 	}
-	vmFlag(save, &name)
-	rm := &cobra.Command{
+	vmFlag(cmd, &name)
+	return cmd
+}
+
+func newSnapshotRmCmd(a *app) *cobra.Command {
+	return &cobra.Command{
 		Use: "rm ID",
 		// For Stella (README.md, "Stella fork"), not in devvm's help.
 		Hidden: true,
@@ -529,57 +429,55 @@ func newSnapshotCmd(a *app) *cobra.Command {
 		Example: examples(
 			"devvm snapshot rm s1", "delete the snapshot s1",
 		),
-		Args: exactArgs(1),
+		Args: cobra.MatchAll(exactArgs(1), snapshotIDArg),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			d, err := a.dirs()
+			_, s, err := snapshotter(a, new(state.VM))
 			if err != nil {
 				return err
 			}
-			return lima.DeleteSnapshot(cmd.Context(), d, args[0])
+			return s.DeleteSnapshot(cmd.Context(), args[0])
 		},
 	}
-	cmd.AddCommand(save, rm)
-	return cmd
 }
 
-// saveSnapshot stops the VM when it runs (Lima clones only a stopped
-// instance), clones it, and starts it again if it was running.
-func saveSnapshot(ctx context.Context, a *app, vmName, id string) error {
-	d, err := a.dirs()
+// saveSnapshot saves the VM name names (the folder's for "") as the
+// snapshot id: one that runs is stopped first (Lima clones only a stopped
+// instance) and started again after, from its folder, which must be
+// there. An id that exists is refused before anything stops.
+func saveSnapshot(ctx context.Context, a *app, name, id string) error {
+	st, err := namedState(ctx, a, name)
 	if err != nil {
 		return err
 	}
-	if err := lima.CheckSnapshotID(id); err != nil {
-		return err
-	}
-	// An ID that exists is refused before the VM is stopped.
-	existing, err := lima.Snapshots(ctx, d)
+	b, s, err := snapshotter(a, st)
 	if err != nil {
 		return err
 	}
-	for _, s := range existing {
-		if s.ID == id {
-			return lima.ErrSnapshotExists
+	ids, err := s.Snapshots(ctx)
+	if err != nil {
+		return err
+	}
+	if slices.Contains(ids, id) {
+		return msg.SnapshotExists(id)
+	}
+	in, err := b.Inspect(ctx, st.Name())
+	if err != nil {
+		return err
+	}
+	running := in.Status == backend.StatusRunning
+	if running && name != "" {
+		if err := toFolder(a, st); err != nil {
+			return err
 		}
-	}
-	cmd := &cobra.Command{}
-	cmd.SetContext(ctx)
-	ls, err := listVMs(cmd, a)
-	if err != nil {
-		return err
-	}
-	running := false
-	for _, l := range ls {
-		if l.Name == vmName {
-			running = l.Status == "Running"
-		}
+	} else if running && vm.FolderOf(st) != vm.FolderThere {
+		return msg.VMFolderGoneStart(st.Dir, st.Name())
 	}
 	if running {
-		if err := a.env(func(env *vm.Env) error { return vm.Lifecycle{Env: env}.Stop(ctx) }, msg.StopVMFailed); err != nil {
+		if err := a.env(func(env *vm.Env) error { return env.StopVM(ctx, st.Name()) }, msg.StopVMFailed); err != nil {
 			return err
 		}
 	}
-	saveErr := lima.SaveSnapshot(ctx, d, vmName, id)
+	saveErr := s.SaveSnapshot(ctx, st.Name(), id)
 	if running {
 		if err := a.env(func(env *vm.Env) error {
 			return vm.Launch{Env: env}.Up(ctx, vm.Options{NoShell: true})

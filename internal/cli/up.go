@@ -38,7 +38,7 @@ type upFlags struct {
 // --parent too (a's).
 func addUpFlags(root *cobra.Command, a *app, uf *upFlags) {
 	f := root.Flags()
-	addNewVMFlags(f, uf)
+	addNewVMFlags(f, uf, "the `PORTS` the VM forwards: all, none or a list like 5173,8000-8010 (default: devvm ports -g, else all)")
 	f.BoolVar(&uf.clone, "clone", false, "create the VM with its own clone of this repo instead of mounting the folder")
 	f.BoolVar(&uf.unsafeFolder, "unsafe-folder", false, "mount a folder devvm refuses, such as your home folder")
 	f.BoolVar(&uf.noGitProtect, "no-git-protect", false, "create the VM without .git protection")
@@ -49,8 +49,9 @@ func addUpFlags(root *cobra.Command, a *app, uf *upFlags) {
 	addSSHConfigFlag(f, &uf.sshConfig)
 }
 
-// addNewVMFlags adds what a new VM gets, devvm's and devvm create's.
-func addNewVMFlags(f *pflag.FlagSet, uf *upFlags) {
+// addNewVMFlags adds what a new VM gets, devvm's and devvm create's, ports
+// saying what --ports does.
+func addNewVMFlags(f *pflag.FlagSet, uf *upFlags, ports string) {
 	f.StringVar(&uf.tools, "tools", "", "the `LIST` of toolchains a new VM gets, such as node,python, or none (default: those the folder's files call for)")
 	addAgentsFlag(f, &uf.agents, "the `LIST` of coding agents a new VM gets, such as claude,codex, or none (default: devvm setup's)")
 	addLayersFlag(f, &uf.layers, "the `LIST` of layers a new VM's image gets, bottom first, such as docker,mine, or none (default: devvm setup's)")
@@ -59,7 +60,7 @@ func addNewVMFlags(f *pflag.FlagSet, uf *upFlags) {
 	f.StringVar(&uf.size.CPUs, "cpus", "", "the `N` CPUs the VM gets (default: devvm size -g, else the image's)")
 	f.StringVar(&uf.size.Memory, "memory", "", "the VM's memory in `GiB`, such as 16 or 16G (default: devvm size -g, else the image's)")
 	f.StringVar(&uf.size.Disk, "disk", "", "the VM's disk in `GiB`, at least the image's (default: devvm size -g, else the image's)")
-	f.StringVar(&uf.ports, "ports", "", "the `PORTS` the VM forwards: all, none or a list like 5173,8000-8010 (default: devvm ports -g, else all)")
+	f.StringVar(&uf.ports, "ports", "", ports)
 }
 
 // options are what the flags ask of up.

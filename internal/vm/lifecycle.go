@@ -32,6 +32,13 @@ func (e Lifecycle) Stop(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	return stopTarget(ctx, e, t, true)
+}
+
+// stopTarget is Stop's and Env.StopVM's: t stopped, then what runs for
+// it, then with checks its folder's .git as Stop says, and its ssh config
+// entry.
+func stopTarget(ctx context.Context, e Lifecycle, t *target, checks bool) error {
 	vm := t.f.Name
 	if t.in.Status == backend.StatusStopped {
 		e.Info(msg.AlreadyStopped(vm))
@@ -44,8 +51,10 @@ func (e Lifecycle) Stop(ctx context.Context) error {
 	e.Proxy.Stop(vm)
 	e.Forwarders.Stop(vm)
 	e.linkRuns.stop(ctx, vm)
-	if err := e.starter.hostChecks(ctx, t, false, false); err != nil {
-		return err
+	if checks {
+		if err := e.starter.hostChecks(ctx, t, false, false); err != nil {
+			return err
+		}
 	}
 	return e.writeSSHConfig(ctx)
 }

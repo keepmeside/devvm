@@ -1067,7 +1067,7 @@ description = "dir is the folder devvm runs in, given --parent"
 other = "No folder that {{.dir}} is inside has a VM. Leave out --parent to use this folder's own."
 
 [rm_vm_folder_flag]
-description = "flag is --here or --parent, given to devvm rm with a VM's name"
+description = "flag is --here, --parent or --vm, given to devvm rm with a VM's name"
 other = "devvm rm VM deletes the VM you name, so it takes no {{.flag}}."
 
 [using_parent_vm]
@@ -2748,3 +2748,38 @@ other = "--to takes a release's version, such as 0.2.0, not {{.value}}."
 [upgrade_failed_reason]
 description = "reason is an error from the system, in English"
 other = "Upgrading devvm failed: {{.reason}}."
+
+# The Stella fork's headless verbs (README.md, "Stella fork").
+
+[snapshot_id_invalid]
+other = "{{.id}} isn't a snapshot ID. Give 1 to 40 lowercase letters, digits and dashes, starting with a letter or digit and not ending in a dash and 14 hex digits."
+
+[snapshot_exists]
+other = "Snapshot {{.id}} already exists. Run devvm snapshot rm {{.id}} first, or give another ID."
+
+[snapshot_missing]
+other = "There's no snapshot {{.id}}. Run devvm snapshot to list them."
+
+[snapshots_unsupported]
+other = "The {{.backend}} backend can't save snapshots."
+
+[saving_snapshot]
+other = "saving {{.vm}} as snapshot {{.id}}"
+
+[snapshot_save_failed]
+other = "Saving {{.vm}} as snapshot {{.id}} failed."
+
+[vm_not_stopped]
+other = "{{.vm}} isn't stopped. Run devvm stop --vm {{.vm}} first."
+
+[vm_folder_gone_start]
+description = "dir is the folder vm was made for, which is gone"
+other = "{{.vm}}'s folder {{.dir}} is gone, and starting it would make that folder again, so devvm won't."
+
+[forward_failed]
+description = "log is the file where ssh wrote why"
+other = "Forwarding {{.vm}}'s port {{.port}} failed. Check that {{.vm}} is running, and {{.log}} for the reason."
+
+[exec_failed]
+description = "reason is an error from the system, in English"
+other = "Running the command in the VM failed: {{.reason}}."

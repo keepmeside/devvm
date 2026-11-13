@@ -263,4 +263,8 @@ func (f Forwards) Lock(ctx context.Context, vm string) (unlock func(), err error
 // it to end, then killing it and waiting up to two more: a start that
 // follows finds its ports free. Every way a VM stops through devvm, or
 // goes, stops it too; one that stops otherwise ends it by its lifeline.
-func (f Forwards) Stop(vm string) { f.proc(vm).Stop(2 * time.Second) }
+// devvm forward's forwards of the VM (PortForwards) stop with it.
+func (f Forwards) Stop(vm string) {
+	f.proc(vm).Stop(2 * time.Second)
+	PortForwards{Dirs: f.Dirs, Args: f.Args}.StopAll(vm)
+}

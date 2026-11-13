@@ -1,152 +1,102 @@
 package lima
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
-	"os"
-	"os/exec"
 	"regexp"
 	"sort"
 	"strings"
 
-	"github.com/devvmhq/devvm/internal/paths"
+	"github.com/devvmhq/devvm/internal/backend"
+	"github.com/devvmhq/devvm/internal/msg"
+	"github.com/devvmhq/devvm/internal/vmname"
 )
 
 // SnapshotPrefix starts the name of every snapshot's instance:
-// devvm-snap-<id>. It is neither an image (ImagePrefix) nor a project VM
-// (vmname.IsVM), so images' housekeeping never counts it as one of theirs.
+// devvm-snap-<id>. List leaves them out, as it does images, so no listing
+// of VMs, nor housekeeping's strays, takes one for a VM; CheckSnapshotID
+// refuses an ID that would make the name a project VM's (vmname.IsVM).
 const SnapshotPrefix = "devvm-snap-"
 
 // snapshotID is what a snapshot's ID may be: lowercase letters, digits and
 // dashes, 1 to 40 of them, starting with a letter or digit.
 var snapshotID = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 
-// ErrSnapshotExists is SaveSnapshot's refusal to overwrite an ID.
-var ErrSnapshotExists = errors.New("snapshot ID exists")
-
-// CheckSnapshotID refuses an ID devvm doesn't take.
+// CheckSnapshotID refuses an ID devvm doesn't take: one snapshotID
+// refuses, or one whose instance's name would be a project VM's
+// (devvm-snap-…-<14 hex>).
 func CheckSnapshotID(id string) error {
-	if !snapshotID.MatchString(id) {
-		return fmt.Errorf("%q isn't a snapshot ID: use 1 to 40 lowercase letters, digits and dashes", id)
+	if !snapshotID.MatchString(id) || vmname.IsVM(SnapshotPrefix+id) {
+		return msg.SnapshotIDInvalid(id)
 	}
 	return nil
 }
 
-// Snapshot is one saved snapshot.
-type Snapshot struct {
-	ID string `json:"id"`
+// isSnapshot reports whether an instance's name is a snapshot's: never a
+// project VM's, such as a folder snap-x's devvm-snap-x-<hash>.
+func isSnapshot(name string) bool {
+	return strings.HasPrefix(name, SnapshotPrefix) && !vmname.IsVM(name)
 }
 
-// limactlOn is limactl with args on devvm's Lima home, in devvm's data
-// folder, without the host's SSH agent.
-func limactlOn(ctx context.Context, d paths.Dirs, args ...string) (*exec.Cmd, error) {
-	path, err := exec.LookPath("limactl")
-	if err != nil {
-		return nil, limaMissing()
-	}
-	if err := os.MkdirAll(d.Data, 0o700); err != nil {
-		return nil, err
-	}
-	cmd := exec.CommandContext(ctx, path, args...) //nolint:gosec // devvm's own arguments
-	cmd.Env = limactlEnv(os.Environ(), d)
-	cmd.Dir = d.Data
-	return cmd, nil
-}
+// snapshots is Lima's backend.Snapshotter: each snapshot is a stopped
+// instance, devvm-snap-<id>, cloned from a stopped VM, which CreateVM
+// clones again for a VM made from it.
+type snapshots struct{ *Lima }
 
-func runLimactl(ctx context.Context, d paths.Dirs, args ...string) ([]byte, error) {
-	cmd, err := limactlOn(ctx, d, args...)
+var _ backend.Snapshotter = (*Lima)(nil)
+
+// Snapshots lists the saved snapshots' IDs, sorted.
+func (l *snapshots) Snapshots(ctx context.Context) ([]string, error) {
+	ins, err := l.list(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return out, fmt.Errorf("limactl %s: %w: %s", args[0], err, strings.TrimSpace(stderr.String()))
+	out := []string{}
+	for _, in := range ins {
+		if id, ok := strings.CutPrefix(in.Name, SnapshotPrefix); ok && CheckSnapshotID(id) == nil {
+			out = append(out, id)
+		}
 	}
+	sort.Strings(out)
 	return out, nil
 }
 
-// limaNames lists the instances in devvm's Lima home, by name, with
-// their status.
-func limaNames(ctx context.Context, d paths.Dirs) (map[string]string, error) {
-	out, err := runLimactl(ctx, d, "list", "--json")
-	if err != nil {
-		return nil, err
-	}
-	names := map[string]string{}
-	dec := json.NewDecoder(bytes.NewReader(out))
-	for {
-		var in struct {
-			Name   string `json:"name"`
-			Status string `json:"status"`
-		}
-		if err := dec.Decode(&in); errors.Is(err, io.EOF) {
-			return names, nil
-		} else if err != nil {
-			return nil, fmt.Errorf("limactl list: %w", err)
-		}
-		names[in.Name] = in.Status
-	}
-}
-
-// SaveSnapshot clones vm, which must be stopped, into the snapshot id.
-// An id that exists is refused, never overwritten.
-func SaveSnapshot(ctx context.Context, d paths.Dirs, vm, id string) error {
+// SaveSnapshot clones vm, which must be stopped, into the snapshot id. An
+// id that exists is refused, never overwritten.
+func (l *snapshots) SaveSnapshot(ctx context.Context, vm, id string) error {
 	if err := CheckSnapshotID(id); err != nil {
 		return err
 	}
-	names, err := limaNames(ctx, d)
+	switch _, err := l.inspect(ctx, SnapshotPrefix+id); {
+	case err == nil:
+		return msg.SnapshotExists(id)
+	case !errors.Is(err, backend.ErrNotFound):
+		return err
+	}
+	in, err := l.inspect(ctx, vm)
 	if err != nil {
 		return err
 	}
-	if _, ok := names[SnapshotPrefix+id]; ok {
-		return ErrSnapshotExists
+	if backend.Status(in.Status) != backend.StatusStopped {
+		return msg.VMNotStopped(vm)
 	}
-	if _, ok := names[vm]; !ok {
-		return fmt.Errorf("no VM %s", vm)
+	if err := l.Runner.Run(ctx, msg.SavingSnapshot(id, vm), l.limactl(ctx, "clone", "--tty=false", vm, SnapshotPrefix+id)); err != nil {
+		return backend.Logged(msg.SnapshotSaveFailed(id, vm))
 	}
-	_, err = runLimactl(ctx, d, "clone", "--tty=false", vm, SnapshotPrefix+id)
-	return err
+	return nil
 }
 
-// DeleteSnapshot deletes the snapshot id; one that isn't there is
-// nothing to do.
-func DeleteSnapshot(ctx context.Context, d paths.Dirs, id string) error {
+// DeleteSnapshot deletes the snapshot id (Lima.delete); one that isn't
+// there is nothing to do.
+func (l *snapshots) DeleteSnapshot(ctx context.Context, id string) error {
 	if err := CheckSnapshotID(id); err != nil {
 		return err
 	}
-	names, err := limaNames(ctx, d)
-	if err != nil {
+	if _, err := l.inspect(ctx, SnapshotPrefix+id); err != nil {
+		if errors.Is(err, backend.ErrNotFound) {
+			return nil
+		}
 		return err
 	}
-	if _, ok := names[SnapshotPrefix+id]; !ok {
-		return nil
-	}
-	_, err = runLimactl(ctx, d, "delete", "--force", SnapshotPrefix+id)
-	return err
-}
-
-// Snapshots lists the saved snapshots, by ID.
-func Snapshots(ctx context.Context, d paths.Dirs) ([]Snapshot, error) {
-	names, err := limaNames(ctx, d)
-	if err != nil {
-		return nil, err
-	}
-	return snapshotsIn(names), nil
-}
-
-func snapshotsIn(names map[string]string) []Snapshot {
-	out := []Snapshot{}
-	for name := range names {
-		if id, ok := strings.CutPrefix(name, SnapshotPrefix); ok && snapshotID.MatchString(id) {
-			out = append(out, Snapshot{ID: id})
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
+	return l.delete(ctx, SnapshotPrefix+id)
 }

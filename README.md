@@ -109,4 +109,4 @@ The docs are at [devvm.dev](https://devvm.dev/), and their source is in `docs/`.
 
 This fork (`keepmeside/devvm`, branch `stella/headless`) adds the verbs Stella uses to run Cloud Boxes and AgentBox boxes on devvm, headless. See `CHANGELOG.md` (0.1.1-stella.1) for each verb. Releases are built with `scripts/stella-release.sh`: the darwin binaries and a `SHA256SUMS`, without the upstream minisign signature, and Stella pins each archive's SHA-256 in its own source.
 
-The same-number port forwarder (`--ports`, `devvm _ports`) is left as upstream has it: Stella forwards with `devvm forward`, which picks a free host port per VM.
+The same-number port forwarder (`--ports`, `devvm _ports`) is left as upstream has it, but a VM made by `devvm create` forwards no ports unless you give `--ports`: Stella forwards with `devvm forward`, which picks a free host port per VM and stops when the VM stops or is deleted through devvm. Snapshots are stopped Lima instances named `devvm-snap-<id>`, which `devvm ls` and `devvm space` leave out.

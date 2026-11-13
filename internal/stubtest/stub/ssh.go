@@ -1,6 +1,9 @@
 package main
 
 import (
+	"io"
+	"net"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -41,8 +44,12 @@ func listenOnce(path string) (int, error) {
 // process that started it, as ssh's does, for 5 minutes (TestScript
 // stops its sandbox's). Host git pushing to and fetching from a --clone
 // VM runs its git-receive-pack or git-upload-pack on the guest's files.
-// With $STUB_DIR/ssh-fails, or for anything else, it fails as ssh does
-// (255).
+// devvm forward's ssh (-N -L 127.0.0.1:PORT:…, no master) listens on
+// PORT until it's stopped, as ssh's does, unless $STUB_DIR/forward-fails
+// is there; devvm exec's (a command after --) prints the remote command
+// line, then its input unless -n, and exits with $STUB_DIR/ssh-exit's
+// number (0 without it). With $STUB_DIR/ssh-fails, or for anything else,
+// it fails as ssh does (255).
 func ssh(c *call) int {
 	c.log()
 	if c.on("ssh-fails") {
@@ -72,9 +79,49 @@ func ssh(c *call) int {
 		return 0
 	case c.has("-M"):
 		return g.ports()
+	case c.has("-N") && c.has("-L"):
+		return c.localForward()
+	case c.has("--"):
+		return c.remote()
 	}
 	if cmd := c.last(); strings.HasPrefix(cmd, "git-receive-pack ") || strings.HasPrefix(cmd, "git-upload-pack ") {
 		return g.pack(cmd)
 	}
 	return 255
+}
+
+// localForward is ssh -N -L: it listens on -L's local port, as ssh does,
+// for masterLife, or fails as ssh does when it can't or with
+// $STUB_DIR/forward-fails.
+func (c *call) localForward() int {
+	local := c.after("-L")
+	host, rest, _ := strings.Cut(local, ":")
+	port, _, _ := strings.Cut(rest, ":")
+	if c.on("forward-fails") {
+		c.say("bind [" + host + "]:" + port + ": Address already in use")
+		return 255
+	}
+	var lc net.ListenConfig
+	l, err := lc.Listen(c.ctx, "tcp", net.JoinHostPort(host, port))
+	if err != nil {
+		c.say("ssh stub: " + err.Error())
+		return 255
+	}
+	defer func() { _ = l.Close() }()
+	c.sleep(masterLife)
+	return 0
+}
+
+// remote is ssh HOST -- LINE: it prints LINE, then its input unless -n,
+// and exits with $STUB_DIR/ssh-exit's number.
+func (c *call) remote() int {
+	c.print(c.last() + "\n")
+	if !c.has("-n") {
+		_, _ = io.Copy(c.stdout, c.stdin)
+	}
+	code, err := strconv.Atoi(c.textOr("ssh-exit", "0"))
+	if err != nil {
+		return 255
+	}
+	return code
 }

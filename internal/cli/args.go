@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/devvmhq/devvm/internal/backend/lima"
 	"github.com/devvmhq/devvm/internal/msg"
 	"github.com/devvmhq/devvm/internal/netpolicy"
 	"github.com/devvmhq/devvm/internal/settings"
@@ -259,6 +260,8 @@ func checkFlagValue(name, value string) error {
 		_, err = state.ParseDuration(value)
 	case "tools", "agents", "layers":
 		err = checkPartFlag("--"+name, value)
+	case "from-snapshot":
+		err = lima.CheckSnapshotID(value)
 	case "to":
 		if !upgrade.Valid(strings.TrimPrefix(value, "v")) {
 			err = msg.UpgradeNotVersion(value)

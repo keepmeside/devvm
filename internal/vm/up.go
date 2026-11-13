@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"os"
@@ -43,6 +44,7 @@ type Options struct {
 	FromSet                    bool           // --from was given, not its default
 	NoDevcontainer             bool           // --no-devcontainer: a new VM ignores the folder's devcontainer.json
 	NoShell                    bool           // devvm create: make or start the VM, then return instead of opening a shell
+	NewPorts                   string         // devvm create: the ports a new VM forwards without --ports (none), instead of devvm ports -g's
 	Snapshot                   string         // devvm create --from-snapshot: a new VM is a clone of this snapshot instead of its image
 }
 
@@ -447,7 +449,7 @@ func (e creation) plan(ctx context.Context, o Options, f project.Folder, b backe
 	if err := n.size.Check(host, backend.BaseDiskGiB, vm); err != nil {
 		return newVM{}, err
 	}
-	if n.ports, n.dcPorts, err = newPorts(o.Ports, def, n.dc); err != nil {
+	if n.ports, n.dcPorts, err = newPorts(cmp.Or(o.Ports, o.NewPorts), def, n.dc); err != nil {
 		return newVM{}, err
 	}
 	parts, err := e.choose(o, f, b, def, host, &n)

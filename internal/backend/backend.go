@@ -23,7 +23,7 @@ import (
 // Backend runs VMs and builds their images: its name and Caps, then its
 // four roles, each an interface of its own that every backend implements.
 // Errors are messages (msg.M) where the user can act on them. A backend
-// may implement Forgetter too, which callers find with As.
+// may implement Forgetter and Snapshotter too, which callers find with As.
 type Backend interface {
 	// Name is the backend's name, as --backend and VM state have it: lima.
 	Name() string

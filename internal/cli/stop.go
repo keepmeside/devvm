@@ -20,8 +20,8 @@ func newStopCmd(a *app) *cobra.Command {
 		),
 		Args: noArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := toVM(a, name); err != nil {
-				return err
+			if name != "" { // the Stella fork's --vm
+				return a.env(func(env *vm.Env) error { return env.StopVM(cmd.Context(), name) }, msg.StopVMFailed)
 			}
 			return a.env(func(env *vm.Env) error { return vm.Lifecycle{Env: env}.Stop(cmd.Context()) }, msg.StopVMFailed)
 		},

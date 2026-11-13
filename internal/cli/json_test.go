@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/devvmhq/devvm/internal/backend"
-	"github.com/devvmhq/devvm/internal/backend/lima"
 	"github.com/devvmhq/devvm/internal/build"
 	"github.com/devvmhq/devvm/internal/netpolicy"
 	"github.com/devvmhq/devvm/internal/settings"
@@ -218,7 +217,7 @@ func TestJSONShapes(t *testing.T) {
 			"vm.folder: string", "vm.name: string", "vm.ssh.config: string", "vm.ssh.host: string", "vm.status: string",
 		}},
 		{"forward", forwardOutput{Host: "127.0.0.1", Port: 47001}, []string{"host: string", "port: number"}},
-		{"snapshot", snapshotOutput{Snapshots: []lima.Snapshot{{ID: "s1"}}}, []string{"snapshots[].id: string"}},
+		{"snapshot", snapshotOutput{Snapshots: []snapshotEntry{{ID: "s1"}}}, []string{"snapshots[].id: string"}},
 	}
 	cases = append(cases, machineShapes()...)
 	shaped := map[string]bool{}

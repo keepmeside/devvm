@@ -162,6 +162,8 @@ func sandbox(env *testscript.Env, bin, stubs string) error {
 		// leave, which outlive them as ssh's do.
 		stopLinkSessions(root)
 		_ = exec.CommandContext(context.Background(), "pkill", "-f", "[-]M -S "+root+"/").Run() //nolint:gosec,forbidigo // the test's own folder; a cleanup, after the scripts' contexts end
+		// And devvm forward's ssh, which outlives devvm as ssh's does.
+		_ = exec.CommandContext(context.Background(), "pkill", "-f", "[-]F "+root+"/data/devvm/ssh_config -o BatchMode=yes -N").Run() //nolint:gosec,forbidigo // the test's own folder; a cleanup, after the scripts' contexts end
 		_ = os.RemoveAll(root)
 	})
 

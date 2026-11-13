@@ -258,7 +258,6 @@ func devvmExecSites() map[string]string {
 		"internal/backend/lima/limactl.go":     "limactl's command, which Lima's Runner runs into the run log",
 		"internal/backend/lima/lima.go":        "qemu-img's command, which Lima's Runner runs",
 		"internal/backend/lima/oci.go":         "docker save's command, which Lima's Runner runs",
-		"internal/backend/lima/snapshot.go":    "limactl list, clone and delete for devvm snapshot (the Stella fork), their output read for the caller",
 		"internal/tools/mise.go":               "mise's command, in its own folders, which the UI's LoggedCmd runs, or whose output is read",
 		"internal/from/from.go":                "docker's answers (an image's ID, whether it runs): output or exit code, nothing to log",
 		"internal/sshagent/sshagent.go":        "OpenSSH's tools on devvm's agent socket, their output read or on the terminal",

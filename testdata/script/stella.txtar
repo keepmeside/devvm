@@ -1,0 +1,181 @@
+# The Stella fork's headless verbs (README.md, "Stella fork"): devvm create
+# makes or starts the folder's VM without a shell, forwarding no ports by
+# default, and prints it; devvm start, exec and forward reach a VM by
+# --vm NAME from any folder, as stop and rm do.
+
+# create --json: the folder's VM made, no shell opened, and printed, its
+# ports none unless --ports.
+project web
+exec devvm create --no-input --tools none --agents none --layers none --network open --json
+vm_name WEB web
+stdout '^  "version": 1,\n  "vm": \{\n    "name": "devvm-web-[0-9a-f]{14}",\n    "folder": "/\S*/web",\n    "status": "Running",\n    "ssh": \{\n      "config": "/\S*/data/devvm/ssh_config",\n      "host": "devvm-web"\n'
+stderr '^new_vm_ports ports=none$'
+stub_calls
+stdout '^limactl clone .*devvm-web-[0-9a-f]{14}'
+! stdout '^limactl shell --workdir /\S*/web devvm-web-[0-9a-f]{14}$'
+exec devvm ports
+stdout '^none$'
+# Again: it's started, as it runs, and printed the same way.
+exec devvm create --no-input --json
+stdout '"name": "devvm-web-[0-9a-f]{14}"'
+! stderr 'ignored'
+
+# From a subfolder, Up's rule finds the folder's VM, and --json prints it.
+mkdir sub
+cd sub
+exec devvm create --no-input --json
+stdout '"name": "devvm-web-[0-9a-f]{14}",\n    "folder": "/\S*/web",'
+cd ..
+
+# exec: the command over devvm's own ssh config, quoted, behind sudo for
+# --root, with its exit code; its input only with -i. From another folder
+# by --vm, by name or ssh alias.
+cd $WORK
+stub_reset
+exec devvm exec --vm $WEB --root -- echo 'hi there'
+stdout '^''sudo'' ''-n'' ''-H'' ''--'' ''echo'' ''hi there''$'
+stub_calls
+stdout '^ssh -F /\S*/data/devvm/ssh_config -o BatchMode=yes -n devvm-web -- '
+stdin input.txt
+exec devvm exec --vm devvm-web -i -- cat
+stdout '^''cat''\nfrom stdin$'
+exec sh -c 'echo 3 > "$STUB_DIR/ssh-exit"'
+! exec devvm exec --vm $WEB -- false
+rm $STUB_DIR/ssh-exit
+cd web
+exec devvm exec -- true
+stdout '^''true''$'
+cd $WORK
+# A name that isn't a VM's, as given or as a path, is refused.
+! exec devvm exec --vm devvm-nope-0123456789abcd -- true
+stderr '^devvm: rm_unknown_vm name=devvm-nope-0123456789abcd$'
+! exec devvm forward --vm ../../x 80
+stderr '^devvm: rm_unknown_vm name=\.\./\.\./x$'
+! exec devvm exec -- true
+stderr '^devvm: no_vm dir=\S*$'
+
+# forward: a free host port, the same one while it works; --close stops
+# it. A bad port is a usage error.
+exec devvm forward --vm $WEB 58790 --json
+stdout '^  "host": "127\.0\.0\.1",\n  "port": [0-9]+\n'
+exec sh -c 'cat "$WEB_dir/run/ports-58790.json"'
+stdout '"guest":58790,"port":[0-9]+,"host":"devvm-web"'
+cp stdout $WORK/rec1
+exec devvm forward --vm $WEB 58790
+stdout '^127\.0\.0\.1:[0-9]+$'
+exec sh -c 'cat "$WEB_dir/run/ports-58790.json"'
+cmp stdout $WORK/rec1
+stub_calls
+stdout '^ssh -F /\S*/data/devvm/ssh_config -o BatchMode=yes -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -L 127\.0\.0\.1:[0-9]+:127\.0\.0\.1:58790 devvm-web$'
+exec sh -c 'kill -0 "$(cat "$WEB_dir/run/ports-58790.pid")"'
+exec devvm forward --vm $WEB 58790 --close
+! exists $WEB_dir/run/ports-58790.json
+exec devvm forward --vm $WEB 58790 --close
+! exec devvm forward --vm $WEB 0
+stderr '^devvm: link_port_invalid value="0"$'
+stderr '^usage_help command=devvm forward$'
+exec sh -c 'touch "$STUB_DIR/forward-fails"'
+! exec devvm forward --vm $WEB 58790
+stderr '^devvm: forward_failed log=/\S*/run/ports-58790\.log port=58790 vm=devvm-web-[0-9a-f]{14}$'
+rm $STUB_DIR/forward-fails
+! exists $WEB_dir/run/ports-58790.json
+
+# stop --vm from another folder stops it, and its forwards with it; start
+# --vm starts it again, from its folder.
+exec devvm forward --vm $WEB 58790
+exec sh -c 'cat "$WEB_dir/run/ports-58790.pid" > "$WORK/fpid"'
+stub_reset
+exec devvm stop --vm $WEB
+stdout '^==> stopped vm=devvm-web-[0-9a-f]{14}$'
+! exec sh -c 'kill -0 "$(cat "$WORK/fpid")"'
+! exists $WEB_dir/run/ports-58790.json
+exec devvm stop --vm devvm-web
+stdout '^==> already_stopped vm=devvm-web-[0-9a-f]{14}$'
+! exec devvm stop --vm $WEB --here
+stderr '^devvm: flags_exclusive '
+stub_reset
+exec devvm start --vm $WEB
+stub_calls
+stdout '^limactl start --tty=false devvm-web-[0-9a-f]{14}$'
+! stdout '^limactl shell --workdir /\S*/web devvm-web-[0-9a-f]{14}$'
+
+# snapshot save: refuses an ID devvm doesn't take (a usage error), stops
+# the running VM, clones it and starts it again; the ID it has is refused
+# before anything stops. ls, ls --json and space never list a snapshot.
+! exec devvm snapshot save --vm $WEB a-0123456789abcd
+stderr '^devvm: snapshot_id_invalid id=a-0123456789abcd$'
+! exec devvm snapshot save --vm $WEB Snap
+stderr '^devvm: snapshot_id_invalid id=Snap$'
+exec devvm snapshot --json
+stdout '^  "snapshots": \[\]\n'
+stub_reset
+exec devvm snapshot save --vm $WEB stella-s1
+stub_calls
+stdout '^limactl stop devvm-web-[0-9a-f]{14}\n(.*\n)*limactl clone --tty=false devvm-web-[0-9a-f]{14} devvm-snap-stella-s1\n(.*\n)*limactl start --tty=false devvm-web-[0-9a-f]{14}\n'
+exec devvm snapshot
+stdout '^stella-s1$'
+exec devvm snapshot --json
+stdout '"snapshots": \[\n    \{\n      "id": "stella-s1"\n    \}\n  \]'
+stub_reset
+! exec devvm snapshot save --vm $WEB stella-s1
+stderr '^devvm: snapshot_exists id=stella-s1$'
+stub_calls
+! stdout 'limactl (stop|clone)'
+exec devvm ls
+! stdout snap
+exec devvm ls --json
+! stdout snap
+exec devvm space --json
+! stdout snap
+# A stopped VM is saved without a start.
+exec devvm stop --vm $WEB
+stub_reset
+exec devvm snapshot save --vm $WEB stella-s2
+stub_calls
+stdout '^limactl clone --tty=false devvm-web-[0-9a-f]{14} devvm-snap-stella-s2$'
+! stdout 'limactl (start|stop)'
+exec devvm snapshot rm stella-s2
+
+# create --from-snapshot: a new VM cloned from the snapshot; one that
+# isn't there is refused.
+project api
+! exec devvm create --no-input --tools none --agents none --layers none --network open --from-snapshot nope
+stderr 'snapshot_missing id=nope'
+! exec devvm create --no-input --from-snapshot Bad
+stderr '^devvm: snapshot_id_invalid id=Bad$'
+stub_reset
+exec devvm create --no-input --tools none --agents none --layers none --network open --from-snapshot stella-s1 --json
+vm_name API api
+stub_calls
+stdout '^limactl clone .*devvm-snap-stella-s1 devvm-api-[0-9a-f]{14}'
+
+# snapshot rm: deletes it; one that isn't there is nothing to do.
+stub_reset
+exec devvm snapshot rm stella-s1
+stub_calls
+stdout '^limactl delete -f devvm-snap-stella-s1$'
+exec devvm snapshot rm stella-s1
+exec devvm snapshot --json
+stdout '"snapshots": \[\]'
+
+# rm --vm: with its folder there, the VM alone from that folder, never the
+# folder; with --vm and a VM's name both, refused; its folder gone, as
+# devvm rm VM.
+cd $WORK
+! exec devvm rm --vm $WEB $WEB --force
+stderr '^devvm: rm_vm_folder_flag flag=--vm$'
+exec devvm forward --vm $WEB 58790
+exec sh -c 'cat "$WEB_dir/run/ports-58790.pid" > "$WORK/fpid"'
+exec devvm rm --vm $WEB --force --no-export
+stdout '==> deleted vm=devvm-web-[0-9a-f]{14}$'
+exists $WORK/web
+! exec sh -c 'kill -0 "$(cat "$WORK/fpid")"'
+rm $WORK/api
+exec devvm rm --vm $API --force --no-export
+stdout '==> deleted vm=devvm-api-[0-9a-f]{14}$'
+! exists $WORK/api
+exec devvm ls --json
+! stdout devvm-
+
+-- input.txt --
+from stdin

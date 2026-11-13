@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+
 	"github.com/spf13/cobra"
 
 	"github.com/devvmhq/devvm/internal/msg"
@@ -24,12 +26,28 @@ func newRmCmd(a *app) *cobra.Command {
 			"devvm rm --no-clone-check", "delete a --clone VM without checking its clone, losing its unfetched work",
 			"devvm rm devvm-web-71a99b1076d92c", "delete a VM whose folder is gone, by its name as devvm ls lists it",
 		),
-		Args: cobra.MatchAll(maxArgs(1), noFolderFlagsWithVM),
+		Args: cobra.MatchAll(maxArgs(1), noFolderFlagsWithVM, noVMFlagWithVM),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// --vm deletes the VM named from its folder, which may still be
-			// there: the VM alone, never the folder.
-			if err := toVM(a, name); err != nil {
-				return err
+			// --vm (the Stella fork's) deletes the VM named: from its folder,
+			// as its own, while the folder is there (the VM alone, never the
+			// folder), else as devvm rm VM does.
+			if name != "" {
+				d, err := a.dirs()
+				if err != nil {
+					return err
+				}
+				st, err := vm.NamedVM(d, name)
+				if err != nil {
+					return err
+				}
+				if vm.FolderOf(st) == vm.FolderThere {
+					if err := os.Chdir(st.Dir); err != nil {
+						return err
+					}
+					a.folder.here = true
+				} else {
+					args = []string{st.Name()}
+				}
 			}
 			if len(args) == 1 {
 				name := args[0]
@@ -57,6 +75,14 @@ func noFolderFlagsWithVM(cmd *cobra.Command, args []string) error {
 		if cmd.Flags().Changed(name) {
 			return msg.RmVMFolderFlag("--" + name)
 		}
+	}
+	return nil
+}
+
+// noVMFlagWithVM refuses --vm with a VM's name: each names the VM.
+func noVMFlagWithVM(cmd *cobra.Command, args []string) error {
+	if len(args) == 1 && cmd.Flags().Changed("vm") {
+		return msg.RmVMFolderFlag("--vm")
 	}
 	return nil
 }

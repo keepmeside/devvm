@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -531,6 +533,46 @@ func TestSSH(t *testing.T) {
 	s.fails(255, "ssh", "-M", "-N", "-S", filepath.Join(s.dir, "no", "such", "ctl"))
 	s.touch("ssh-fails")
 	s.fails(255, "ssh", "vm", "git-receive-pack '/w'")
+}
+
+// ssh: devvm forward's -N -L listens on its local port while it sleeps,
+// and fails on a port that's taken or with forward-fails; devvm exec's
+// command prints its line, its input unless -n, and exits with ssh-exit.
+func TestSSHForwardAndExec(t *testing.T) {
+	s := newSandbox(t)
+	var lc net.ListenConfig
+	l, err := lc.Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	taken := strconv.Itoa(l.Addr().(*net.TCPAddr).Port)
+	s.fails(255, "ssh", "-N", "-L", "127.0.0.1:"+taken+":127.0.0.1:80", "vm")
+	_ = l.Close()
+	listened := false
+	s.onSleep = func() {
+		c, err := (&net.Dialer{}).DialContext(t.Context(), "tcp", "127.0.0.1:"+taken)
+		if err == nil {
+			listened = true
+			_ = c.Close()
+		}
+	}
+	s.ok("", "ssh", "-N", "-L", "127.0.0.1:"+taken+":127.0.0.1:80", "vm")
+	s.onSleep = nil
+	if !listened {
+		t.Error("the forward didn't listen")
+	}
+	s.touch("forward-fails")
+	s.fails(255, "ssh", "-N", "-L", "127.0.0.1:"+taken+":127.0.0.1:80", "vm")
+	if out := s.ok("in", "ssh", "-n", "vm", "--", "'true'"); out != "'true'\n" {
+		t.Errorf("exec -n printed %q", out)
+	}
+	if out := s.ok("in", "ssh", "vm", "--", "'cat'"); out != "'cat'\nin" {
+		t.Errorf("exec printed %q", out)
+	}
+	s.write("ssh-exit", "3\n")
+	s.fails(3, "ssh", "-n", "vm", "--", "'false'")
+	s.write("ssh-exit", "x\n")
+	s.fails(255, "ssh", "-n", "vm", "--", "'false'")
 }
 
 // ssh-agent runs an agent; ssh-add adds, lists and deletes its keys on

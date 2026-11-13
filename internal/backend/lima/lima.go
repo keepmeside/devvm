@@ -54,12 +54,13 @@ const driverWait = 30 * time.Second
 // methods are Name, Caps and what its roles share (limactl, inspect…);
 // the rest are its roles', host, images, machines and housekeeping, each
 // a type of its own over this Lima (withRoles), as backend.Backend's
-// roles are.
+// roles are, and the optional snapshots (backend.Snapshotter).
 type Lima struct {
 	host
 	images
 	machines
 	housekeeping
+	snapshots
 
 	Dirs   paths.Dirs
 	Runner Runner
@@ -136,7 +137,7 @@ var _ backend.Backend = (*Lima)(nil)
 
 // withRoles returns l with its roles, each on l.
 func withRoles(l *Lima) *Lima {
-	l.host, l.images, l.machines, l.housekeeping = host{l}, images{l}, machines{l}, housekeeping{l}
+	l.host, l.images, l.machines, l.housekeeping, l.snapshots = host{l}, images{l}, machines{l}, housekeeping{l}, snapshots{l}
 	return l
 }
 
@@ -406,11 +407,12 @@ func (l *machines) CreateVM(ctx context.Context, image string, spec backend.VMSp
 		src = SnapshotPrefix + spec.Snapshot
 	}
 	img, err := l.inspect(ctx, src)
-	if errors.Is(err, backend.ErrNotFound) && spec.Snapshot != "" {
-		return fmt.Errorf("no snapshot %s", spec.Snapshot)
-	} else if errors.Is(err, backend.ErrNotFound) {
+	switch {
+	case errors.Is(err, backend.ErrNotFound) && spec.Snapshot != "":
+		return msg.SnapshotMissing(spec.Snapshot)
+	case errors.Is(err, backend.ErrNotFound):
 		return msg.ImageMissing(image)
-	} else if err != nil {
+	case err != nil:
 		return err
 	}
 	// The clone has its image's driver, so its project mount is the one
@@ -569,7 +571,7 @@ func (l *machines) Rename(ctx context.Context, vm, to string) error {
 	return nil
 }
 
-// List lists the VMs in devvm's Lima home, without images.
+// List lists the VMs in devvm's Lima home, without images and snapshots.
 func (l *machines) List(ctx context.Context) ([]backend.Instance, error) {
 	ins, err := l.list(ctx)
 	if err != nil {
@@ -577,7 +579,7 @@ func (l *machines) List(ctx context.Context) ([]backend.Instance, error) {
 	}
 	var out []backend.Instance
 	for _, in := range ins {
-		if _, ok := imageKey(in.Name); !ok {
+		if _, ok := imageKey(in.Name); !ok && !isSnapshot(in.Name) {
 			out = append(out, in.backend())
 		}
 	}

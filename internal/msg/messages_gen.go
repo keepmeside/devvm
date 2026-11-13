@@ -1114,6 +1114,11 @@ func DownloadingMise(version string) M {
 	return M{id: "downloading_mise", vals: []val{{"version", version}}}
 }
 
+// ExecFailed is [exec_failed]: "Running the command in the VM failed: {{.reason}}."
+func ExecFailed(reason string) M {
+	return M{id: "exec_failed", vals: []val{{"reason", reason}}}
+}
+
 // ExportFailed is [export_failed]: "Exporting the agent history of this folder's VM failed: {{.reason}}."
 func ExportFailed(reason string) M {
 	return M{id: "export_failed", vals: []val{{"reason", reason}}}
@@ -1202,6 +1207,11 @@ func FoldersNotPrivate(config string, data string) M {
 // ForgotOrphan is [forgot_orphan]: "deleted what devvm kept for {{.vm}}"
 func ForgotOrphan(vm string) M {
 	return M{id: "forgot_orphan", vals: []val{{"vm", vm}}}
+}
+
+// ForwardFailed is [forward_failed]: "Forwarding {{.vm}}'s port {{.port}} failed. Check that {{.vm}} is running, and {{.log}} for the reason."
+func ForwardFailed(log string, port string, vm string) M {
+	return M{id: "forward_failed", vals: []val{{"log", log}, {"port", port}, {"vm", vm}}}
 }
 
 // ForwarderFailed is [forwarder_failed]: "The port forwarder failed: {{.reason}}."
@@ -3184,6 +3194,11 @@ func SavingHome(vm string) M {
 	return M{id: "saving_home", vals: []val{{"vm", vm}}}
 }
 
+// SavingSnapshot is [saving_snapshot]: "saving {{.vm}} as snapshot {{.id}}"
+func SavingSnapshot(id string, vm string) M {
+	return M{id: "saving_snapshot", vals: []val{{"id", id}, {"vm", vm}}}
+}
+
 // ScriptFailed is [script_failed]: "{{.script}} failed in {{.vm}}, and devvm keeps it stopped until the next build or devvm gc deletes it. To look inside, run devvm limactl shell --start {{.vm}}."
 func ScriptFailed(script string, vm string) M {
 	return M{id: "script_failed", vals: []val{{"script", script}, {"vm", vm}}}
@@ -3317,6 +3332,31 @@ func SizePendingRunning(size string, vm string) M {
 // SizeQuestion is [size_question]: "This machine has {{.have_cpus}} CPUs and {{.have_memory}} GiB of memory. Type the CPUs and memory new VMs get, or press Enter to keep the size in brackets."
 func SizeQuestion(haveCpus string, haveMemory string) M {
 	return M{id: "size_question", vals: []val{{"have_cpus", haveCpus}, {"have_memory", haveMemory}}}
+}
+
+// SnapshotExists is [snapshot_exists]: "Snapshot {{.id}} already exists. Run devvm snapshot rm {{.id}} first, or give another ID."
+func SnapshotExists(id string) M {
+	return M{id: "snapshot_exists", vals: []val{{"id", id}}}
+}
+
+// SnapshotIDInvalid is [snapshot_id_invalid]: "{{.id}} isn't a snapshot ID. Give 1 to 40 lowercase letters, digits and dashes, starting with a letter or digit and not ending in a dash and 14 hex digits."
+func SnapshotIDInvalid(id string) M {
+	return M{id: "snapshot_id_invalid", vals: []val{{"id", id}}}
+}
+
+// SnapshotMissing is [snapshot_missing]: "There's no snapshot {{.id}}. Run devvm snapshot to list them."
+func SnapshotMissing(id string) M {
+	return M{id: "snapshot_missing", vals: []val{{"id", id}}}
+}
+
+// SnapshotSaveFailed is [snapshot_save_failed]: "Saving {{.vm}} as snapshot {{.id}} failed."
+func SnapshotSaveFailed(id string, vm string) M {
+	return M{id: "snapshot_save_failed", vals: []val{{"id", id}, {"vm", vm}}}
+}
+
+// SnapshotsUnsupported is [snapshots_unsupported]: "The {{.backend}} backend can't save snapshots."
+func SnapshotsUnsupported(backend string) M {
+	return M{id: "snapshots_unsupported", vals: []val{{"backend", backend}}}
 }
 
 // SpaceBackendUnknown is [space_backend_unknown]: "The {{.backend}} backend didn't answer, so its VMs and images aren't counted."
@@ -3879,6 +3919,11 @@ func VMCurrent(image string, vm string) M {
 	return M{id: "vm_current", vals: []val{{"image", image}, {"vm", vm}}}
 }
 
+// VMFolderGoneStart is [vm_folder_gone_start]: "{{.vm}}'s folder {{.dir}} is gone, and starting it would make that folder again, so devvm won't."
+func VMFolderGoneStart(dir string, vm string) M {
+	return M{id: "vm_folder_gone_start", vals: []val{{"dir", dir}, {"vm", vm}}}
+}
+
 // VMFolderStateless is [vm_folder_stateless]: "A devvm that stopped while making or deleting a VM left {{.path}}, which has no vm.json, so no VM uses it. Delete the folder."
 func VMFolderStateless(path string) M {
 	return M{id: "vm_folder_stateless", vals: []val{{"path", path}}}
@@ -3907,6 +3952,11 @@ func VMNameNoRoom(backend string, max string) M {
 // VMNotRunning is [vm_not_running]: "{{.vm}} isn't running. Start it first."
 func VMNotRunning(vm string) M {
 	return M{id: "vm_not_running", vals: []val{{"vm", vm}}}
+}
+
+// VMNotStopped is [vm_not_stopped]: "{{.vm}} isn't stopped. Run devvm stop --vm {{.vm}} first."
+func VMNotStopped(vm string) M {
+	return M{id: "vm_not_stopped", vals: []val{{"vm", vm}}}
 }
 
 // VMOtherFolder is [vm_other_folder]: "{{.vm}} was made for an earlier folder at {{.was}}, which was deleted or replaced. Run devvm rm to delete the VM, or devvm adopt to use it here."
@@ -4198,6 +4248,7 @@ var specs = map[string]spec{
 	"doctor_ok":                      {fields: []string{"backend", "version"}},
 	"doctor_proxy_ca":                {fields: []string{"dir"}},
 	"downloading_mise":               {fields: []string{"version"}},
+	"exec_failed":                    {fields: []string{"reason"}},
 	"export_failed":                  {fields: []string{"reason"}},
 	"export_failed_kept":             {fields: []string{"command", "vm"}},
 	"exported":                       {fields: []string{"file", "vm"}},
@@ -4216,6 +4267,7 @@ var specs = map[string]spec{
 	"flags_exclusive":                {fields: []string{"flag", "other"}},
 	"folders_not_private":            {fields: []string{"config", "data"}},
 	"forgot_orphan":                  {fields: []string{"vm"}},
+	"forward_failed":                 {fields: []string{"log", "port", "vm"}},
 	"forwarder_failed":               {fields: []string{"reason"}},
 	"from_cached_not_found":          {fields: []string{"from", "host"}},
 	"from_cached_unreachable":        {fields: []string{"from", "host"}},
@@ -4612,6 +4664,7 @@ var specs = map[string]spec{
 	"saved_branches":                 {fields: []string{"branches"}},
 	"saved_names_taken":              {fields: []string{"command", "remote", "vm"}},
 	"saving_home":                    {fields: []string{"vm"}},
+	"saving_snapshot":                {fields: []string{"id", "vm"}},
 	"script_failed":                  {fields: []string{"script", "vm"}},
 	"secret_failed":                  {fields: []string{"reason"}},
 	"secret_host_only":               {fields: []string{"secret"}},
@@ -4639,6 +4692,11 @@ var specs = map[string]spec{
 	"size_pending":                   {fields: []string{"size", "vm"}},
 	"size_pending_running":           {fields: []string{"size", "vm"}},
 	"size_question":                  {fields: []string{"have_cpus", "have_memory"}},
+	"snapshot_exists":                {fields: []string{"id"}},
+	"snapshot_id_invalid":            {fields: []string{"id"}},
+	"snapshot_missing":               {fields: []string{"id"}},
+	"snapshot_save_failed":           {fields: []string{"id", "vm"}},
+	"snapshots_unsupported":          {fields: []string{"backend"}},
 	"space_backend_unknown":          {fields: []string{"backend"}},
 	"space_caches_note":              {},
 	"space_failed":                   {fields: []string{"reason"}},
@@ -4751,12 +4809,14 @@ var specs = map[string]spec{
 	"vm_changed":                     {fields: []string{"changed", "vm"}},
 	"vm_create_failed":               {fields: []string{"vm"}},
 	"vm_current":                     {fields: []string{"image", "vm"}},
+	"vm_folder_gone_start":           {fields: []string{"dir", "vm"}},
 	"vm_folder_stateless":            {fields: []string{"path"}},
 	"vm_has_networks":                {fields: []string{"file", "vm"}},
 	"vm_lacks":                       {fields: []string{"has", "tool", "vm"}},
 	"vm_moved_here":                  {fields: []string{"vm", "was"}},
 	"vm_name_no_room":                {fields: []string{"backend", "max"}},
 	"vm_not_running":                 {fields: []string{"vm"}},
+	"vm_not_stopped":                 {fields: []string{"vm"}},
 	"vm_other_folder":                {fields: []string{"vm", "was"}},
 	"vm_other_folder_adopt":          {fields: []string{"vm", "was"}},
 	"vm_other_folder_rm":             {fields: []string{"vm", "was"}},
